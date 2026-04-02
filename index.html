@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ORION COCKPIT | Deep Space Travel</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Orbitron', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        /* --- LE COCKPIT (Interface CSS par dessus la 3D) --- */
+        #cockpit {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+            /* Cadre du cockpit avec effet verre */
+            box-shadow: inset 0 0 200px rgba(0,0,0,0.8), inset 0 0 10px rgba(0, 255, 255, 0.2);
+            background: radial-gradient(circle at center, transparent 50%, rgba(0, 10, 20, 0.8) 100%);
+        }
+        
+        /* Effet de vitre incurvée et reflets */
+        #cockpit::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 20%, transparent 80%, rgba(255,255,255,0.05) 100%);
+            pointer-events: none;
+        }
+
+        /* Tableau de bord holographique */
+        #dashboard {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 20px;
+            pointer-events: auto; /* Active les clics */
+            perspective: 1000px;
+        }
+
+        .holo-btn {
+            background: rgba(0, 30, 60, 0.6);
+            border: 1px solid #00f2ff; color: #00f2ff;
+            padding: 15px 30px; font-family: 'Orbitron'; font-size: 14px; letter-spacing: 2px;
+            cursor: pointer; text-transform: uppercase; transition: 0.4s;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.2);
+            backdrop-filter: blur(4px); transform: rotateX(20deg); /* Effet 3D sur les boutons */
+        }
+
+        .holo-btn:hover { background: #00f2ff; color: #000; box-shadow: 0 0 30px #00f2ff; transform: rotateX(0deg) scale(1.05); }
+        .holo-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        #speed-gauge {
+            position: absolute; top: 20px; right: 20px;
+            color: #00f2ff; font-size: 24px; font-weight: bold;
+            text-shadow: 0 0 10px #00f2ff;
+        }
+        #status-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: white; font-size: 2rem; text-transform: uppercase; letter-spacing: 5px;
+            opacity: 0; transition: opacity 0.5s; text-shadow: 0 0 20px white;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="cockpit">
+        <div id="speed-gauge">VITESSE: <span id="speed-val">0</span> C</div>
+        <div id="status-msg">Hyperespace Engagé</div>
+        <div id="dashboard">
+            <button class="holo-btn" onclick="travelTo('earth')">Terre (Secteur 001)</button>
+            <button class="holo-btn" onclick="travelTo('mars')">Mars (Secteur 004)</button>
+            <button class="holo-btn" onclick="travelTo('nebula')">Nébuleuse Orion (Lointain)</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        // --- CONFIGURATION DE BASE ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.0005); // Brouillard pour cacher le lointain
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Lumière du soleil (au centre de l'univers)
+        const sunLight = new THREE.PointLight(0xffffff, 2, 0);
+        sunLight.position.set(0, 0, 0);
+        scene.add(sunLight);
+        scene.add(new THREE.AmbientLight(0x333333)); // Lumière ambiante
+
+        const textureLoader = new THREE.TextureLoader();
+
+        // --- CRÉATION DES PLANÈTES ---
+        function createPlanet(size, textureUrl, position, bumpMapUrl = null) {
+            const geo = new THREE.SphereGeometry(size, 64, 64);
+            const mat = new THREE.MeshPhongMaterial({
+                map: textureLoader.load(textureUrl),
+                bumpMap: bumpMapUrl ? textureLoader.load(bumpMapUrl) : null,
+                bumpScale: 0.5, shininess: 5
+            });
+            const planet = new THREE.Mesh(geo, mat);
+            planet.position.set(position.x, position.y, position.z);
+            scene.add(planet);
+            return planet;
+        }
+
+        // Position des destinations dans l'espace 3D
+        const locations = {
+            earth: { pos: new THREE.Vector3(0, 0, 300), obj: null },
+            mars: { pos: new THREE.Vector3(800, 0, -500), obj: null },
+            nebula: { pos: new THREE.Vector3(-1500, 500, -2000), obj: null } // Très loin
+        };
+
+        // Chargement des textures et création des objets
+        locations.earth.obj = createPlanet(50, 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg', locations.earth.pos, 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg');
+        
+        locations.mars.obj = createPlanet(40, 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg', locations.mars.pos);
+        locations.mars.obj.material.color.setHex(0xff4400); // On teinte la Terre en rouge pour faire Mars (hack rapide)
+
+        // Pour la Nébuleuse, on fait un gros nuage coloré
+        const nebulaGeo = new THREE.SphereGeometry(300, 32, 32);
+        const nebulaMat = new THREE.MeshBasicMaterial({
+            map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/sprites/disc.png'),
+            side: THREE.BackSide, color: 0xaa00ff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending
+        });
+        locations.nebula.obj = new THREE.Mesh(nebulaGeo, nebulaMat);
+        locations.nebula.obj.position.copy(locations.nebula.pos);
+        scene.add(locations.nebula.obj);
+
+
+        // --- LE VRAI SYSTÈME D'HYPERESPACE (Stretched Stars) ---
+        const starCount = 8000;
+        // Au lieu de points, on utilise des cylindres très fins qu'on va étirer
+        const starGeo = new THREE.CylinderGeometry(0.2, 0.2, 1, 4); // Rayon 0.2, hauteur 1 (initiale)
+        const starMat = new THREE.MeshBasicMaterial({ color: 0xffffff, blending: THREE.AdditiveBlending });
+        // InstancedMesh est vital pour la performance avec 8000 objets
+        const starField = new THREE.InstancedMesh(starGeo, starMat, starCount);
+        
+        const dummy = new THREE.Object3D();
+        const starData = []; // Pour stocker les positions initiales
+
+        // On place les étoiles aléatoirement dans un cube géant
+        for(let i=0; i<starCount; i++) {
+            dummy.position.set(
+                (Math.random() - 0.5) * 8000,
+                (Math.random() - 0.5) * 8000,
+                (Math.random() - 0.5) * 8000
+            );
+            dummy.rotation.x = Math.PI / 2; // On couche les cylindres pour qu'ils pointent vers nous
+            dummy.updateMatrix();
+            starField.setMatrixAt(i, dummy.matrix);
+            starData.push({ x: dummy.position.x, y: dummy.position.y, z: dummy.position.z });
+        }
+        scene.add(starField);
+
+        // --- SYSTÈME DE NAVIGATION ---
+        let currentSpeed = 0;
+        let targetSpeed = 0;
+        let isTraveling = false;
+        let destinationVec = new THREE.Vector3();
+        let startVec = new THREE.Vector3();
+        let travelProgress = 0;
+
+        // Position de départ de la caméra
+        camera.position.copy(locations.earth.pos);
+        camera.position.z += 150; // On se met en orbite autour de la Terre
+        camera.lookAt(locations.earth.pos);
+
+        window.travelTo = function(destName) {
+            if(isTraveling) return;
+            isTraveling = true;
+            startVec.copy(camera.position);
+            // On vise une position légèrement devant la planète cible pour ne pas rentrer dedans
+            destinationVec.copy(locations[destName].pos).add(new THREE.Vector3(0, 0, 150)); 
+            
+            // Séquence de voyage
+            targetSpeed = 100; // Accélération max
+            document.getElementById('status-msg').style.opacity = 1;
+            document.querySelectorAll('.holo-btn').forEach(btn => btn.disabled = true);
+
+            // Début du voyage (accélération)
+            setTimeout(() => {
+                travelProgress = 0.01; // Lance le mouvement physique de la caméra
+                
+                // Milieu du voyage (vitesse max stabilisée)
+                setTimeout(() => {
+                     // Fin du voyage (décélération)
+                    targetSpeed = 0;
+                    document.getElementById('status-msg').style.opacity = 0;
+                    
+                    setTimeout(() => {
+                        isTraveling = false;
+                        travelProgress = 0;
+                        // La caméra regarde la nouvelle planète
+                        camera.lookAt(locations[destName].pos);
+                        document.querySelectorAll('.holo-btn').forEach(btn => btn.disabled = false);
+                    }, 2000); // Temps de décélération
+
+                }, 4000); // Temps de croisière
+
+            }, 2000); // Temps d'accélération
+        }
+
+        // --- BOUCLE PRINCIPALE (ANIMATION) ---
+        function animate() {
+            // 1. Gestion de la vitesse (inertie)
+            currentSpeed += (targetSpeed - currentSpeed) * 0.02;
+            document.getElementById('speed-val').innerText = Math.round(currentSpeed * 10);
+
+            // 2. Déplacement physique de la caméra pendant le voyage
+            if(travelProgress > 0 && travelProgress < 1) {
+                // On utilise une courbe d'accélération pour que le mouvement ne soit pas linéaire
+                travelProgress += 0.003 * (currentSpeed / 50); 
+                // Interpolation linéaire (lerp) entre le point de départ et l'arrivée
+                camera.position.lerpVectors(startVec, destinationVec, travelProgress);
+                // Pendant le voyage, on regarde droit devant
+                camera.lookAt(destinationVec);
+            }
+            
+            // 3. L'EFFET HYPERESPACE (Le secret est ici)
+            // On déplace le champ d'étoiles en sens inverse de la caméra pour l'effet de mouvement
+            starField.position.z += currentSpeed; 
+            if(starField.position.z > 2000) starField.position.z = -2000; // Reset du champ
+
+            // C'est LA ligne qui crée les traînées : on étire l'axe Y des cylindres (qui sont couchés, donc leur profondeur Z locale)
+            // Plus on va vite, plus le scale Y est grand. 1 = taille normale.
+            let stretchFactor = 1 + currentSpeed * 2; 
+
+            for(let i=0; i<starCount; i++) {
+                dummy.position.set(starData[i].x, starData[i].y, starData[i].z);
+                dummy.rotation.x = Math.PI / 2; 
+                // On applique l'étirement
+                dummy.scale.set(1, stretchFactor, 1);
+                dummy.updateMatrix();
+                starField.setMatrixAt(i, dummy.matrix);
+            }
+            starField.instanceMatrix.needsUpdate = true;
+
+            // 4. Animation des planètes (rotation douce)
+            for(const key in locations) {
+                if(locations[key].obj) locations[key].obj.rotation.y += 0.001;
+            }
+
+            // Petit mouvement de respiration du pilote
+            if(!isTraveling) {
+                 camera.position.y += Math.sin(Date.now()*0.001) * 0.1;
+            }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
